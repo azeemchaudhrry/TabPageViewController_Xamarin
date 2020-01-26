@@ -3,13 +3,13 @@ using CoreGraphics;
 using Foundation;
 using UIKit;
 
-namespace TabPageViewController
+namespace TabPageViewController_Xamarin
 {
     public partial class TabCollectionCell : UICollectionViewCell
     {
         public static readonly NSString Key = new NSString("TabCollectionCell");
         public static readonly UINib Nib;
-
+        
         public Action<TabView, TabCollectionCell> tabItemButtonPressedBlock;
 
         private TabPageOption _options;
@@ -18,7 +18,8 @@ namespace TabPageViewController
             get { return _options; }
             set
             {
-                //
+                _options = value;
+                currentBarViewHeightConstraint.Constant = _options.currentBarHeight;
             }
         }
 
@@ -28,7 +29,10 @@ namespace TabPageViewController
             get { return _item; }
             set
             {
-                //
+                _item = value;
+                itemLabel.Text = _item;
+                itemLabel.InvalidateIntrinsicContentSize();
+                InvalidateIntrinsicContentSize();
             }
         }
 
@@ -38,7 +42,8 @@ namespace TabPageViewController
             get { return _isCurrent; }
             set
             {
-                //currentBarView.isHidden = !_isCurrent;
+                _isCurrent = value;
+                currentBarView.Hidden = !_isCurrent;
                 if (_isCurrent)
                 {
                     highlightTitle();
@@ -47,7 +52,7 @@ namespace TabPageViewController
                 {
                     unHighlightTitle();
                 }
-                //currentBarView.BackgroundColor = option.currentColor;
+                currentBarView.BackgroundColor = option.currentColor;
                 LayoutIfNeeded();
             }
         }
@@ -66,14 +71,13 @@ namespace TabPageViewController
         {
             base.AwakeFromNib();
 
-            //currentBarView.IsHidden = true;
+            currentBarView.Hidden = true;
         }
 
         public override CGSize SizeThatFits(CGSize size)
         {
             if (item.Length == 0) return CGSize.Empty;
-            //return intrinsicContentSize;
-            return base.SizeThatFits(size);
+            return IntrinsicContentSize;
         }
 
         public override CGSize IntrinsicContentSize
@@ -87,7 +91,7 @@ namespace TabPageViewController
                 }
                 else
                 {
-                    //width = itemLabel.intrinsicContentSize.width + option.tabMargin * 2;
+                    width = itemLabel.IntrinsicContentSize.Width + option.tabMargin * 2;
                 }
 
                 var size = new CGSize(width, option.tabHeight);
@@ -95,28 +99,36 @@ namespace TabPageViewController
             }
         }
 
-        private void hideCurrentBarView()
+        public void hideCurrentBarView()
         {
-            //hideCurrentBarView.isHidden = true;
+            currentBarView.Hidden = true;
         }
 
-        private void showCurrentBarView()
+        public void showCurrentBarView()
         {
-            //hideCurrentBarView.isHidden = false;
+            currentBarView.Hidden = false;
         }
 
-        private void highlightTitle()
+        public void highlightTitle()
         {
-            //itemLabel.textColor = option.currentColor
-            //itemLabel.font = UIFont.boldSystemFont(ofSize: option.fontSize)
+            itemLabel.TextColor = option.currentColor;
+            itemLabel.Font = UIFont.BoldSystemFontOfSize(option.fontSize);
         }
 
-        private void unHighlightTitle()
+        public void unHighlightTitle()
         {
-            //itemLabel.textColor = option.defaultColor
-            //itemLabel.font = UIFont.systemFont(ofSize: option.fontSize)
+            itemLabel.TextColor = option.defaultColor;
+            itemLabel.Font = UIFont.SystemFontOfSize(option.fontSize);
         }
 
-        //
+        public static string cellIdentifier()
+        {
+            return "TabCollectionCell";
+        }
+
+        partial void tabItemTouchUpInside(Foundation.NSObject sender)
+        {
+            //tabItemButtonPressedBlock();
+        }
     }
 }

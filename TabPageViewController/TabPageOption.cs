@@ -6,7 +6,7 @@ using CoreGraphics;
 using Foundation;
 using UIKit;
 
-namespace TabPageViewController
+namespace TabPageViewController_Xamarin
 {
     public class TabPageOption
     {

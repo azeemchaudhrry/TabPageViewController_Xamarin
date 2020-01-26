@@ -6,14 +6,14 @@ using CoreGraphics;
 using Foundation;
 using UIKit;
 
-namespace TabPageViewController
+namespace TabPageViewController_Xamarin
 {
-    public class TabView : UIView
+    public partial class TabView : UIView
         , IUICollectionViewDataSource
         , IUICollectionViewDelegate
         , IUICollectionViewDelegateFlowLayout
     {
-        Action<nint, UIPageViewControllerNavigationDirection> pageItemPressedBlock;
+        public Action<nint, UIPageViewControllerNavigationDirection> pageItemPressedBlock;
         string[] _pageTabItems;
         public string[] pageTabItems
         {
@@ -39,32 +39,140 @@ namespace TabPageViewController
         public Dictionary<NSIndexPath, CGSize> cachedCellSizes { get; set; }
         public NSLayoutConstraint currentBarViewLeftConstraint { get; set; }
 
+        public TabView(NSCoder coder) : base(coder)
+        {
+
+        }
+
         public TabView(bool _isInfinity, TabPageOption _option) : base(CGRect.Empty)
         {
             option = _option;
             isInfinity = _isInfinity;
-            //Bundle(for: TabView.self).loadNibNamed("TabView", owner: self, options: nil)
-            //AddSubview(contentView);
-            //contentView.backgroundColor = option.tabBackgroundColor.withAlphaComponent(option.tabBarAlpha)
+            NSBundle.FromClass(new ObjCRuntime.Class(typeof(TabView))).LoadNib(nameof(TabView), this, null);
+            AddSubview(contentView);
+            contentView.BackgroundColor = option.tabBackgroundColor.ColorWithAlpha(option.tabBarAlpha);
 
+            var top = NSLayoutConstraint.Create(contentView, NSLayoutAttribute.Top, NSLayoutRelation.Equal, this, NSLayoutAttribute.Top, 1.0f, 0.0f);
+            var left = NSLayoutConstraint.Create(contentView, NSLayoutAttribute.Leading, NSLayoutRelation.Equal, this, NSLayoutAttribute.Leading, 1.0f, 0.0f);
+            var bottom = NSLayoutConstraint.Create(this, NSLayoutAttribute.Bottom, NSLayoutRelation.Equal, contentView, NSLayoutAttribute.Bottom, 1.0f, 0.0f);
+            var right = NSLayoutConstraint.Create(this, NSLayoutAttribute.Trailing, NSLayoutRelation.Equal, contentView, NSLayoutAttribute.Trailing, 1.0f, 0.0f);
+            contentView.TranslatesAutoresizingMaskIntoConstraints = false;
+            this.AddConstraints(new NSLayoutConstraint[] { top, left, bottom, right });
+
+            var bundle = NSBundle.FromClass(new ObjCRuntime.Class(typeof(TabView)));
+            var nib = UINib.FromName(TabCollectionCell.cellIdentifier(), bundle);
+            collectionView.RegisterNibForCell(nib, TabCollectionCell.cellIdentifier());
+            cellForSize = nib.Instantiate(null, null).First() as TabCollectionCell;
+
+            collectionView.ScrollsToTop = false;
+            collectionView.DataSource = this;
+            collectionView.Delegate = this;
+            //collectionView.SetCollectionViewLayout(this, true);
+            collectionView.Delegate = this;
+
+            currentBarView.BackgroundColor = option.currentColor;
+            currentBarViewHeightConstraint.Constant = option.currentBarHeight;
+
+            if (!isInfinity)
+            {
+                currentBarView.RemoveFromSuperview();
+                collectionView.AddSubview(currentBarView);
+                collectionView.TranslatesAutoresizingMaskIntoConstraints = false;
+
+                var topOne = NSLayoutConstraint.Create(currentBarView, NSLayoutAttribute.Top, NSLayoutRelation.Equal, collectionView, NSLayoutAttribute.Top, 1.0f,
+                    option.tabHeight - currentBarViewHeightConstraint.Constant);
+                var leftOne = NSLayoutConstraint.Create(currentBarView, NSLayoutAttribute.Leading, NSLayoutRelation.Equal, collectionView, NSLayoutAttribute.Leading, 1.0f, 0.0f);
+
+                currentBarViewLeftConstraint = leftOne;
+                collectionView.AddConstraints(new[] { topOne, leftOne });
+            }
+
+            bottomBarViewHeightConstraint.Constant = 1.0f / UIScreen.MainScreen.Scale;
+        }
+
+        public void scrollCurrentBarView(int index, nfloat contentOffsetX)
+        {
+            var nextIndex = isInfinity ? index + pageTabItemsCount : index;
+            if(isInfinity && index == 0 && (beforeIndex - pageTabItemsCount) == pageTabItemsCount - 1)
+            {
+                nextIndex = pageTabItemsCount * 2;
+            }
+            else if (isInfinity && (index == pageTabItemsCount - 1) && (beforeIndex - pageTabItemsCount) == 0)
+            {
+                nextIndex = pageTabItemsCount - 1;
+            }
+
+            if(collectionViewContentOffsetX ==  0.0)
+            {
+                collectionViewContentOffsetX = collectionView.ContentOffset.X;
+            }
+
+            var currentIndexPath = NSIndexPath.FromItemSection(currentIndex, 0);
+            var nextIndexPath = NSIndexPath.FromItemSection(nextIndex, 0);
+            var currentCell = collectionView.CellForItem(currentIndexPath) as TabCollectionCell;
+            var nextCell = collectionView.CellForItem(nextIndexPath) as TabCollectionCell;
+
+            nextCell.hideCurrentBarView();
+            currentCell.hideCurrentBarView();
+            currentBarView.Hidden = false;
+
+            if(currentBarViewWidth == 0.0)
+            {
+                currentBarViewWidth = currentCell.Frame.Width;
+            }
+
+            var distance = (currentCell.Frame.Width / 2.0) + (nextCell.Frame.Width / 2.0);
+            var scrollRate = contentOffsetX / Frame.Width;
+
+            if(Math.Abs(scrollRate) > 0.6)
+            {
+                nextCell.highlightTitle();
+                currentCell.unHighlightTitle();
+            }
+            else
+            {
+                nextCell.unHighlightTitle();
+                currentCell.highlightTitle();
+            }
+
+            var width = (nfloat)Math.Abs(scrollRate) * (nextCell.Frame.Width - currentCell.Frame.Width);
+
+            if (isInfinity)
+            {
+                var scroll = scrollRate * distance;
+                collectionView.SetContentOffset(new CGPoint(collectionViewContentOffsetX + scroll, collectionView.ContentOffset.Y), true);
+            }
+            else
+            {
+                if(scrollRate > 0)
+                {
+                    currentBarViewLeftConstraint.Constant = currentCell.Frame.GetMinX() + scrollRate * currentCell.Frame.Width;
+                }
+                else
+                {
+                    currentBarViewLeftConstraint.Constant = currentCell.Frame.GetMinX() + nextCell.Frame.Width * scrollRate;
+                }
+            }
+
+            currentBarViewWidthConstraint.Constant = currentBarViewWidth + width;
         }
 
 
         /**
         Center the current cell after page swipe
         */
-        private void scrollToHorizontalCenter()
+        public void scrollToHorizontalCenter()
         {
             var indexPath = NSIndexPath.Create(currentIndex, 0);
-            collectionView.scrollToItem(at: indexPath, at: .centeredHorizontally, animated: false);
-            collectionViewContentOffsetX = collectionView.contentOffset.x;
+            collectionView.ScrollToItem(indexPath, UICollectionViewScrollPosition.CenteredHorizontally, false);
+            collectionViewContentOffsetX = collectionView.ContentOffset.X;
         }
 
         /**
         Called in after the transition is complete pages in isInfinityTabPageViewController in the process of updating the current 
         - parameter index: Next Index
         */
-        private void updateCurrentIndex(int index, bool shouldScroll)
+        public void updateCurrentIndex(int index, bool shouldScroll)
         {
             deselectVisibleCells();
 
@@ -79,9 +187,9 @@ namespace TabPageViewController
 
      - parameter index: Next IndexPath√
      */
-        private void updateCurrentIndexForTap(int index)
+        public void updateCurrentIndexForTap(int index)
         {
-            //deselectVisibleCells();
+            deselectVisibleCells();
 
             if (isInfinity && (index < pageTabItemsCount) || (index >= pageTabItemsCount * 2))
             {
@@ -107,26 +215,26 @@ namespace TabPageViewController
         {
             if (shouldScroll)
             {
-                collectionView.scrollToItem(at: indexPath, at: .centeredHorizontally, animated: animated);
+                collectionView.ScrollToItem(indexPath, UICollectionViewScrollPosition.CenteredHorizontally,animated);
                 LayoutIfNeeded();
                 collectionViewContentOffsetX = 0.0f;
                 currentBarViewWidth = 0.0f;
             }
 
-            var cell = collectionView.cellForItem(at: indexPath);
+            var cell = collectionView.CellForItem(indexPath);
 
-            if (cell is TabCollectionCell)
+            if (cell is TabCollectionCell currentCell)
             {
-                currentBarView.isHidden = false;
+                currentBarView.Hidden = false;
                 if (animated && shouldScroll)
                 {
-                    cell.isCurrent = true;
+                    currentCell.isCurrent = true;
                 }
-                cell.hideCurrentBarView();
-                currentBarViewWidthConstraint.constant = cell.frame.width;
+                currentCell.hideCurrentBarView();
+                currentBarViewWidthConstraint.Constant = cell.Frame.Width;
                 if (!isInfinity)
                 {
-                    currentBarViewLeftConstraint?.constant = cell.frame.origin.x;
+                    currentBarViewLeftConstraint.Constant = cell.Frame.Location.X;
                 }
                 UIView.Animate(0.2, animation: () =>
                 {
@@ -137,7 +245,7 @@ namespace TabPageViewController
                 {
                     if (!animated && shouldScroll)
                     {
-                        cell.isCurrent = true;
+                        currentCell.isCurrent = true;
                     }
                     this.updateCollectionViewUserInteractionEnabled(true);
                 });
@@ -161,9 +269,9 @@ namespace TabPageViewController
 
     - parameter userInteractionEnabled: collectionViewに渡すuserInteractionEnabled
     */
-        private void updateCollectionViewUserInteractionEnabled(bool userInteractionEnabled)
+        public void updateCollectionViewUserInteractionEnabled(bool userInteractionEnabled)
         {
-            collectionView.isUserInteractionEnabled = userInteractionEnabled;
+            collectionView.UserInteractionEnabled = userInteractionEnabled;
         }
 
         /**
@@ -171,30 +279,32 @@ namespace TabPageViewController
      */
         private void deselectVisibleCells()
         {
-            collectionView.visibleCells.flatMap { $0 as? TabCollectionCell }.forEach { $0.isCurrent = false }
+            //collectionView.visibleCells.flatMap { $0 as? TabCollectionCell }.forEach { $0.isCurrent = false }
         }
 
         #region IUICollectionViewDataSource
+        [Export("collectionView:numberOfItemsInSection:")]
         public nint GetItemsCount(UICollectionView collectionView, nint section)
         {
-            return isInfinity ? pageTabItemsCount * 3 : pageTabItemsCount
+            return isInfinity ? pageTabItemsCount * 3 : pageTabItemsCount;
         }
 
+        [Export("collectionView:cellForItemAtIndexPath:")]
         public UICollectionViewCell GetCell(UICollectionView collectionView, NSIndexPath indexPath)
         {
-            var cell = collectionView.DequeueReusableCell(withReuseIdentifier: TabCollectionCell.cellIdentifier(), indexPath) as TabCollectionCell;
+            var cell = collectionView.DequeueReusableCell(TabCollectionCell.cellIdentifier(), indexPath) as TabCollectionCell;
             configureCell(cell, indexPath: indexPath);
             return cell;
         }
 
-        private void configureCell(TabCollectionCell cell, NSIndexPath indexPath)
+        public void configureCell(TabCollectionCell cell, NSIndexPath indexPath)
         {
             var fixedIndex = isInfinity ? indexPath.Item % pageTabItemsCount : indexPath.Item;
             cell.item = pageTabItems[fixedIndex];
             cell.option = option;
             cell.isCurrent = fixedIndex == (currentIndex % pageTabItemsCount);
 
-            cell.tabItemButtonPressedBlock = (arg1, arg2) => 
+            cell.tabItemButtonPressedBlock = (arg1, arg2) =>
             {
                 var direction = UIPageViewControllerNavigationDirection.Forward;
                 var pageTabItemsCount = arg1.pageTabItemsCount;
@@ -208,7 +318,7 @@ namespace TabPageViewController
                 }
                 else
                 {
-                    if(indexPath.Item < currentIndex)
+                    if (indexPath.Item < currentIndex)
                     {
                         direction = UIPageViewControllerNavigationDirection.Reverse;
                     }
@@ -225,10 +335,11 @@ namespace TabPageViewController
             };
         }
 
+
         public void WillDisplayCell(UICollectionView collectionView, UICollectionViewCell cell, NSIndexPath indexPath)
         {
             var currentcell = cell as TabCollectionCell;
-            if(currentcell != null && layouted)
+            if (currentcell != null && layouted)
             {
                 var fixedIndex = isInfinity ? indexPath.Item % pageTabItemsCount : indexPath.Item;
                 currentcell.isCurrent = fixedIndex == (currentIndex % pageTabItemsCount);
@@ -243,12 +354,12 @@ namespace TabPageViewController
         {
             if (scrollView.Dragging)
             {
-                //currentBarView.isHidden = true;
+                currentBarView.Hidden = true;
                 var indexPath = NSIndexPath.FromItemSection(currentIndex, 0);
-                var cell = collectionView.ItemAt(indexPath) as TabCollectionCell;
+                var cell = collectionView.CellForItem(indexPath) as TabCollectionCell;
                 if(!(cell is null))
                 {
-                    //cell.showCurrentBarView();
+                    cell.showCurrentBarView();
                 }
             }
 
@@ -274,7 +385,7 @@ namespace TabPageViewController
             var indexPath = NSIndexPath.FromItemSection(currentIndex, 0);
             if (shouldScrollToItem)
             {
-                collectionView.scrollToItem(at: indexPath, at: .centeredHorizontally, animated: false);
+                collectionView.ScrollToItem(indexPath, UICollectionViewScrollPosition.CenteredHorizontally, false);
                 shouldScrollToItem = false;
             }
         }
@@ -282,7 +393,7 @@ namespace TabPageViewController
         #endregion
 
         #region IUICollectionViewDelegateFlowLayout
-
+        [Export("collectionView:layout:sizeForItemAtIndexPath:")]
         public CGSize GetSizeForItem(UICollectionView collectionView, UICollectionViewLayout collectionViewLayout, NSIndexPath indexPath)
         {
             var size = cachedCellSizes[indexPath];
@@ -295,15 +406,85 @@ namespace TabPageViewController
 
             return newSize;
         }
-
+        [Export("collectionView:layout:minimumItemSpacingForSectionAtIndex:")]
         public nfloat GetMinimumInteritemSpacingForSection(UICollectionView collectionView, UICollectionViewLayout collectionViewLayout, int section)
         {
             return 0.0f;
         }
+        [Export("collectionView:layout:minimumLineSpacingForSectionAtIndex:")]
         public nfloat GetMinimumLineSpacingForSection(UICollectionView collectionView, UICollectionViewLayout collectionViewLayout, int section)
         {
             return 0.0f;
         }
         #endregion
+    }
+
+    public class TabViewCollectionDataSource : UICollectionViewSource
+    {
+        TabView tabView;
+        public TabViewCollectionDataSource(TabView _tabView)
+        {
+            tabView = _tabView;
+        }
+
+        public override UICollectionViewCell GetCell(UICollectionView collectionView, NSIndexPath indexPath)
+        {
+            var cell = collectionView.DequeueReusableCell(TabCollectionCell.cellIdentifier(), indexPath) as TabCollectionCell;
+            configureCell(cell, indexPath: indexPath, tabView);
+            return cell;
+        }
+
+        public override nint GetItemsCount(UICollectionView collectionView, nint section)
+        {
+            return tabView.isInfinity ? tabView.pageTabItemsCount * 3 : tabView.pageTabItemsCount;
+        }
+
+        public void configureCell(TabCollectionCell cell, NSIndexPath indexPath, TabView tabView)
+        {
+            var fixedIndex = tabView.isInfinity ? indexPath.Item % tabView.pageTabItemsCount : indexPath.Item;
+            cell.item = tabView.pageTabItems[fixedIndex];
+            cell.option = tabView.option;
+            cell.isCurrent = fixedIndex == (tabView.currentIndex % tabView.pageTabItemsCount);
+
+            cell.tabItemButtonPressedBlock = (arg1, arg2) =>
+            {
+                var direction = UIPageViewControllerNavigationDirection.Forward;
+                var pageTabItemsCount = arg1.pageTabItemsCount;
+                var currentIndex = arg1.currentIndex;
+                if (arg1.isInfinity)
+                {
+                    if (indexPath.Item < pageTabItemsCount || indexPath.Item < currentIndex)
+                    {
+                        direction = UIPageViewControllerNavigationDirection.Reverse;
+                    }
+                }
+                else
+                {
+                    if (indexPath.Item < currentIndex)
+                    {
+                        direction = UIPageViewControllerNavigationDirection.Reverse;
+                    }
+                }
+
+                arg1.pageItemPressedBlock(fixedIndex, direction);
+
+                if (arg2?.isCurrent == false)
+                {
+                    arg1.updateCollectionViewUserInteractionEnabled(false);
+                }
+
+                arg1.updateCurrentIndexForTap((int)indexPath.Item);
+            };
+        }
+
+        public override void WillDisplayCell(UICollectionView collectionView, UICollectionViewCell cell, NSIndexPath indexPath)
+        {
+            var currentcell = cell as TabCollectionCell;
+            if (currentcell != null && tabView.layouted)
+            {
+                var fixedIndex = tabView.isInfinity ? indexPath.Item % tabView.pageTabItemsCount : indexPath.Item;
+                currentcell.isCurrent = fixedIndex == (tabView.currentIndex % tabView.pageTabItemsCount);
+            }
+        }
     }
 }

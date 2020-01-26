@@ -6,17 +6,20 @@ using System.Text;
 using Foundation;
 using UIKit;
 
-namespace TabPageViewController
+namespace TabPageViewController_Xamarin
 {
     public class TabItem
     {
+        public TabItem(UIViewController _viewController, string _title)
+        {
+            title = _title;
+            viewController = _viewController;
+        }
         public string title { get; set; }
         public UIViewController viewController { get; set; }
     }
-    public class TabPageViewController : UIPageViewController,
-        IUIPageViewControllerDataSource,
-        IUIPageViewControllerDelegate,
-        IUIScrollViewDelegate
+
+    public class TabPageViewController : UIPageViewController
     {
         public bool isInfinity { get; set; } = false;
         public TabPageOption option { get; set; } = new TabPageOption();
@@ -41,14 +44,22 @@ namespace TabPageViewController
         public NSLayoutConstraint statusViewHeightConstraint { get; set; }
         public NSLayoutConstraint tabBarTopConstraint { get; set; }
 
-        public TabPageViewController() : base(UIPageViewControllerTransitionStyle.Scroll, UIPageViewControllerNavigationOrientation.Horizontal, null) { }
+        public TabPageViewController() : base(UIPageViewControllerTransitionStyle.Scroll, UIPageViewControllerNavigationOrientation.Horizontal) { }
+        public TabPageViewController(IntPtr handle) : base(UIPageViewControllerTransitionStyle.Scroll, UIPageViewControllerNavigationOrientation.Horizontal) { }
 
-        public TabPageViewController(NSCoder coder) : base(UIPageViewControllerTransitionStyle.Scroll, UIPageViewControllerNavigationOrientation.Horizontal, null) { }
+        public TabPageViewController(NSCoder coder) : base(UIPageViewControllerTransitionStyle.Scroll, UIPageViewControllerNavigationOrientation.Horizontal) { }
 
         public override void ViewDidLoad()
         {
             base.ViewDidLoad();
 
+            if (tabItems == null) return;
+
+            ReloadPage();
+        }
+
+        public virtual void ReloadPage()
+        {
             setupPageViewController();
             setupScrollView();
             updateNavigationBar();
@@ -58,14 +69,14 @@ namespace TabPageViewController
         {
             base.ViewWillAppear(animated);
 
-            if (tabView.Superview == null)
+            if (tabView == null || tabView.Superview == null)
             {
-                //tabView = configuredTabView();
+                tabView = configuredTabView();
             }
 
             if (currentIndex.HasValue && isInfinity)
             {
-                //tabView.updateCurrentIndex(currentIndex, shouldScroll: true);
+                tabView.updateCurrentIndex(currentIndex.Value, shouldScroll: true);
             }
         }
 
@@ -91,24 +102,20 @@ namespace TabPageViewController
             shouldScrollCurrentBar = false;
             UIViewController nextViewControllers = tabItems[index].viewController;
 
-            /*
-             let completion: ((Bool) -> Void) = { [weak self] _ in
-            self?.shouldScrollCurrentBar = true
-            self?.beforeIndex = index
-        }
-
-             */
-
-            SetViewControllers(new[] { nextViewControllers }, direction, animated, null);
+            SetViewControllers(new[] { nextViewControllers }, direction, animated, (arg) =>
+            {
+                shouldScrollCurrentBar = true;
+                beforeIndex = index;
+            });
 
             if (IsViewLoaded) return;
-            //tabView.updateCurrentIndex(index, true);
+            tabView.updateCurrentIndex(index, true);
         }
 
         private void setupPageViewController()
         {
-            DataSource = this;
-            Delegate = this;
+            DataSource = new TabPageDataSource(tabItems, this);
+            Delegate = new TabPageDelegate(this);
 
             AutomaticallyAdjustsScrollViewInsets = false;
 
@@ -117,11 +124,19 @@ namespace TabPageViewController
 
         private void setupScrollView()
         {
-            var scrollView = View.Subviews.First(x => x.Subviews is UIScrollView) as UIScrollView;
+            UIScrollView scrollView = null;
+            foreach (var item in View.Subviews)
+            {
+                if(item is UIScrollView scrollView1)
+                {
+                    scrollView = scrollView1;
+                    break;
+                }
+            }
             if (scrollView != null)
             {
                 scrollView.ScrollsToTop = false;
-                scrollView.Delegate = this;
+                scrollView.Delegate = new TabPageScrollViewDelegate(this);
                 scrollView.BackgroundColor = option.pageBackgroundColor;
             }
         }
@@ -129,7 +144,7 @@ namespace TabPageViewController
         private void updateNavigationBar()
         {
             var navigationBar = NavigationController?.NavigationBar;
-            if(navigationBar != null)
+            if (navigationBar != null)
             {
                 navigationBar.ShadowImage = new UIImage();
                 navigationBar.SetBackgroundImage(option.tabBackgroundImage, UIBarMetrics.Default);
@@ -139,7 +154,7 @@ namespace TabPageViewController
 
         private TabView configuredTabView()
         {
-            var _tabView = new TabView(isInfinity, option);
+            tabView = new TabView(isInfinity, option);
             tabView.TranslatesAutoresizingMaskIntoConstraints = false;
 
             //add constraints
@@ -154,9 +169,12 @@ namespace TabPageViewController
             View.AddConstraints(new[] { top, left, right });
 
             tabView.pageTabItems = tabItems.Select(x => x.title).ToArray();
-            //tabView.updateCurrentIndex(beforeIndex, true);
+            tabView.updateCurrentIndex(beforeIndex, true);
 
-            //TODO add remaining here
+            tabView.pageItemPressedBlock += (index, direction) =>
+            {
+                this.displayControllerWithIndex((int)index, direction, true);
+            };
 
             return tabView;
         }
@@ -170,7 +188,7 @@ namespace TabPageViewController
 
             var top = NSLayoutConstraint.Create(statusView, NSLayoutAttribute.Top, NSLayoutRelation.Equal, View, NSLayoutAttribute.Top, 1.0f, 0.0f);
             var left = NSLayoutConstraint.Create(statusView, NSLayoutAttribute.Leading, NSLayoutRelation.Equal, View, NSLayoutAttribute.Leading, 1.0f, 0.0f);
-            var right = NSLayoutConstraint.Create(statusView, NSLayoutAttribute.Trailing, NSLayoutRelation.Equal, statusView, NSLayoutAttribute.Trailing, 1.0f, 0.0f); 
+            var right = NSLayoutConstraint.Create(statusView, NSLayoutAttribute.Trailing, NSLayoutRelation.Equal, statusView, NSLayoutAttribute.Trailing, 1.0f, 0.0f);
             var height = NSLayoutConstraint.Create(statusView, NSLayoutAttribute.Height, NSLayoutRelation.Equal, null, NSLayoutAttribute.Height, 1.0f, TopLayoutGuide.Length);
 
             View.AddConstraints(new[] { top, left, right, height });
@@ -215,7 +233,7 @@ namespace TabPageViewController
                     break;
             }
 
-            if(statusView == null)
+            if (statusView == null)
             {
                 setupStatusView();
             }
@@ -230,7 +248,7 @@ namespace TabPageViewController
             if (NavigationController.NavigationBarHidden) return;
             if (tabBarTopConstraint == null) return;
 
-            if(option.hidesTopViewOnSwipeType != HidesTopContentsOnSwipeType.none)
+            if (option.hidesTopViewOnSwipeType != HidesTopContentsOnSwipeType.none)
             {
                 tabBarTopConstraint.Constant = 0.0f;
                 UIView.Animate(UINavigationController.HideShowBarDuration, () => { View.LayoutIfNeeded(); });
@@ -249,6 +267,142 @@ namespace TabPageViewController
 
 
         #region IUIPageViewControllerDataSource
+        //private UIViewController nextViewController(UIViewController viewController, bool isAfter)
+        //{
+        //    var index = Array.FindIndex(tabItems, x => x.viewController == viewController);
+        //    if (index < 0) return null;
+        //    if (isAfter) index += 1;
+        //    else index -= 1;
+
+        //    if (isInfinity)
+        //    {
+        //        if (index < 0)
+        //        {
+        //            index = tabItems.Length - 1;
+        //        }
+        //        else if (index == tabItems.Length)
+        //        {
+        //            index = 0;
+        //        }
+        //    }
+
+        //    if (index >= 0 && index < tabItems.Length)
+        //    {
+        //        return tabItems[index].viewController;
+        //    }
+        //    return null;
+        //}
+
+        //[Export("pageViewController:viewControllerBeforeViewController:")]
+        //UIViewController IUIPageViewControllerDataSource.GetPreviousViewController(UIPageViewController pageViewController, UIViewController referenceViewController)
+        //{
+        //    return nextViewController(referenceViewController, isAfter: false);
+        //}
+
+        //[Export("pageViewController:viewControllerAfterViewController:")]
+        //UIViewController IUIPageViewControllerDataSource.GetNextViewController(UIPageViewController pageViewController, UIViewController referenceViewController)
+        //{
+        //    return nextViewController(referenceViewController, isAfter: true);
+        //}
+        #endregion
+
+        #region IUIPageViewControllerDelegate
+
+
+        //[Export("pageViewController:didFinishAnimating:")]
+        //public new void DidFinishAnimating(UIPageViewController pageViewController, bool finished, UIViewController[] previousViewControllers, bool completed)
+        //{
+        //    if (currentIndex.HasValue && currentIndex < tabItemCount)
+        //    {
+        //        tabView.updateCurrentIndex((int)currentIndex, shouldScroll: false);
+        //        beforeIndex = currentIndex.Value;
+        //    }
+
+        //    tabView.updateCollectionViewUserInteractionEnabled(true);
+        //}
+
+        //[Export("pageViewController:willTransitionToViewControllers:")]
+        //public new void WillTransition(UIPageViewController pageViewController, UIViewController[] pendingViewControllers)
+        //{
+        //    shouldScrollCurrentBar = true;
+        //    tabView.scrollToHorizontalCenter();
+
+        //    // Order to prevent the the hit repeatedly during animation
+        //    tabView.updateCollectionViewUserInteractionEnabled(false);
+        //}
+
+        #endregion
+
+        #region IUIScrollViewDelegate
+
+        //public void Scrolled(UIScrollView scrollView)
+        //{
+        //    if (scrollView.ContentOffset.X == defaultContentOffsetX || !shouldScrollCurrentBar)
+        //    {
+        //        return;
+        //    }
+
+        //    int index;
+
+        //    if (scrollView.ContentOffset.X > defaultContentOffsetX)
+        //    {
+        //        index = beforeIndex + 1;
+        //    }
+        //    else
+        //    {
+        //        index = beforeIndex - 1;
+        //    }
+
+        //    if (index == tabItemCount)
+        //    {
+        //        index = 0;
+        //    }
+        //    else if (index < 0)
+        //    {
+        //        index = tabItemCount - 1;
+        //    }
+
+        //    var scrollOffsetX = scrollView.ContentOffset.X - View.Frame.Width;
+        //    tabView.scrollCurrentBarView(index, scrollOffsetX);
+        //}
+        //public void DecelerationEnded(UIScrollView scroolView)
+        //{
+        //    tabView.updateCurrentIndex(beforeIndex, true);
+        //}
+        #endregion
+    }
+    public class TabPageDataSource : UIPageViewControllerDataSource
+    {
+        TabItem[] tabItems;
+        TabPageViewController tabPageViewController;
+
+        public TabPageDataSource(TabItem[] _tabItems, TabPageViewController _viewController)
+        {
+            tabItems = _tabItems;
+            tabPageViewController = _viewController;
+        }
+
+        public override nint GetPresentationCount(UIPageViewController pageViewController)
+        {
+            return tabItems.Length;
+        }
+
+        public override nint GetPresentationIndex(UIPageViewController pageViewController)
+        {
+            return 0;
+            return base.GetPresentationIndex(pageViewController);
+        }
+
+        public override UIViewController GetNextViewController(UIPageViewController pageViewController, UIViewController referenceViewController)
+        {
+            return nextViewController(referenceViewController, isAfter: true);
+        }
+
+        public override UIViewController GetPreviousViewController(UIPageViewController pageViewController, UIViewController referenceViewController)
+        {
+            return nextViewController(referenceViewController, isAfter: false);
+        }
+
         private UIViewController nextViewController(UIViewController viewController, bool isAfter)
         {
             var index = Array.FindIndex(tabItems, x => x.viewController == viewController);
@@ -256,9 +410,9 @@ namespace TabPageViewController
             if (isAfter) index += 1;
             else index -= 1;
 
-            if(isInfinity)
+            if (tabPageViewController.isInfinity)
             {
-                if(index < 0)
+                if (index < 0)
                 {
                     index = tabItems.Length - 1;
                 }
@@ -268,85 +422,88 @@ namespace TabPageViewController
                 }
             }
 
-            if(index >= 0 && index < tabItems.Length)
+            if (index >= 0 && index < tabItems.Length)
             {
                 return tabItems[index].viewController;
             }
             return null;
         }
-        UIViewController IUIPageViewControllerDataSource.GetPreviousViewController(UIPageViewController pageViewController, UIViewController referenceViewController)
+    }
+
+    public class TabPageDelegate : UIPageViewControllerDelegate
+    {
+        TabPageViewController tabPageViewController;
+
+        public TabPageDelegate(TabPageViewController _tabPageViewController)
         {
-            return nextViewController(referenceViewController, isAfter: false);
+            tabPageViewController = _tabPageViewController;
         }
 
-        UIViewController IUIPageViewControllerDataSource.GetNextViewController(UIPageViewController pageViewController, UIViewController referenceViewController)
+        public override void DidFinishAnimating(UIPageViewController pageViewController, bool finished, UIViewController[] previousViewControllers, bool completed)
         {
-            return nextViewController(referenceViewController, isAfter: true);
-        }
-        #endregion
-
-        #region IUIPageViewControllerDelegate
-
-
-        [Export("pageViewController:didFinishAnimating:previousViewControllers:transitionCompleted:")]
-        public void DidFinishAnimating(UIPageViewController pageViewController, bool finished, UIViewController[] previousViewControllers, bool completed)
-        {
-            if(currentIndex.HasValue && currentIndex < tabItemCount)
+            if (tabPageViewController.currentIndex.HasValue && tabPageViewController.currentIndex < tabPageViewController.tabItemCount)
             {
-                //tabView.updateCurrentIndex(currentIndex, shouldScroll: false);
-                beforeIndex = currentIndex.Value;
+                tabPageViewController.tabView.updateCurrentIndex((int)tabPageViewController.currentIndex, shouldScroll: false);
+                tabPageViewController.beforeIndex = tabPageViewController.currentIndex.Value;
             }
 
-            //tabView.updateCollectionViewUserInteractionEnabled(true);
+            tabPageViewController.tabView.updateCollectionViewUserInteractionEnabled(true);
         }
 
-        public void WillTransition(UIPageViewController pageViewController, UIViewController[] pendingViewControllers)
+        public override void WillTransition(UIPageViewController pageViewController, UIViewController[] pendingViewControllers)
         {
-            shouldScrollCurrentBar = true;
-            //tabView.ScrollToHorizontalCenter();
+            tabPageViewController.shouldScrollCurrentBar = true;
+            tabPageViewController.tabView.scrollToHorizontalCenter();
 
             // Order to prevent the the hit repeatedly during animation
-            //tabView.UpdateCollectionViewUserInteractionEnabled(false);
+            tabPageViewController.tabView.updateCollectionViewUserInteractionEnabled(false);
+        }
+    }
+
+    public class TabPageScrollViewDelegate : UIScrollViewDelegate
+    {
+        TabPageViewController controller;
+        public TabPageScrollViewDelegate(TabPageViewController _controller)
+        {
+            controller = _controller;
         }
 
-        #endregion
-
-        #region IUIScrollViewDelegate
-
-        public void Scrolled(UIScrollView scrollView)
+        public override void Scrolled(UIScrollView scrollView)
         {
-            if(scrollView.ContentOffset.X == defaultContentOffsetX || !shouldScrollCurrentBar)
+            //base.Scrolled(scrollView);
+            if (scrollView.ContentOffset.X == controller.defaultContentOffsetX || !controller.shouldScrollCurrentBar)
             {
                 return;
             }
 
             int index;
 
-            if(scrollView.ContentOffset.X > defaultContentOffsetX)
+            if (scrollView.ContentOffset.X > controller.defaultContentOffsetX)
             {
-                index = beforeIndex + 1;
+                index = controller.beforeIndex + 1;
             }
             else
             {
-                index = beforeIndex - 1;
+                index = controller.beforeIndex - 1;
             }
 
-            if(index == tabItemCount)
+            if (index == controller.tabItemCount)
             {
                 index = 0;
             }
-            else if(index < 0)
+            else if (index < 0)
             {
-                index = tabItemCount - 1;
+                index = controller.tabItemCount - 1;
             }
 
-            var scrollOffsetX = scrollView.ContentOffset.X - View.Frame.Width;
-            //tabView.scrollCurrentBarView(index, scrollOffsetX);
+            var scrollOffsetX = scrollView.ContentOffset.X - controller.View.Frame.Width;
+            controller.tabView.scrollCurrentBarView(index, scrollOffsetX);
         }
-        public void DecelerationEnded(UIScrollView scroolView)
+
+        public override void DecelerationEnded(UIScrollView scrollView)
         {
-            //tabView.updateCurrentIndex(beforeIndex, true);
+            controller.tabView.updateCurrentIndex(controller.beforeIndex, true);
+            base.DecelerationEnded(scrollView);
         }
-        #endregion
     }
 }
